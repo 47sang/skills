@@ -1,6 +1,6 @@
 ---
 name: resolve-merge-conflicts
-description: Resolve Git merge conflicts by extracting only unresolved paths, conflict hunks, and compact diffs instead of loading whole files into context. Use when a merge, rebase, cherry-pick, or stash pop stops on conflicts, when `git status` shows unmerged paths, or when files contain conflict markers.
+description: 通过只提取未解决的路径、冲突片段与精简差异来解决 Git 合并冲突，而不是把整个文件载入上下文。当合并（merge）、变基（rebase）、拣选（cherry-pick）或储藏恢复（stash pop）因冲突中断、`git status` 显示未合并路径，或文件中存在冲突标记时使用。
 ---
 
 # 解决合并冲突

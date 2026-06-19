@@ -1,6 +1,6 @@
 ---
 name: spec-driven-implementation
-description: Drive a spec-first workflow for substantial features by writing PRODUCT.md before implementation, writing TECH.md when warranted, and keeping both specs updated as implementation evolves. Use when starting a significant feature, planning agent-driven implementation, or when the user wants product and tech specs checked into source control.
+description: 驱动面向重要功能的「规格优先」工作流——在实现前先写 `PRODUCT.md`，必要时再写 `TECH.md`，并在实现演进过程中保持两份规格同步更新。当启动一个重要功能、规划智能体（agent）驱动的实现，或希望把产品与技术规格签入源码时使用。
 ---
 
 # spec-driven-implementation

@@ -1,6 +1,6 @@
 ---
 name: fix-errors
-description: Fix compilation errors, linting issues, and test failures in a Rust codebase. Covers common rustc/clippy errors, WASM-specific constraints, and running targeted tests. Use when the user hits build errors, clippy or fmt failures, test failures, or needs to run presubmit checks before a PR.
+description: 修复 Rust 代码库中的编译错误、代码检查（lint）问题与测试失败，覆盖常见的 rustc / clippy 错误、WebAssembly（WASM）专属约束，以及运行定向测试。当用户遇到构建错误、clippy 或 fmt 失败、测试失败，或需要在提交 PR 前运行预检查时使用。
 ---
 
 # fix-errors

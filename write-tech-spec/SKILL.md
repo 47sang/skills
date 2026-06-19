@@ -1,6 +1,6 @@
 ---
 name: write-tech-spec
-description: Write a TECH.md spec for a significant feature after researching the current codebase and implementation constraints. Use when the user asks for a technical spec, implementation plan, or architecture doc tied to a product spec.
+description: 在调研现有代码库与实现约束后，为重要功能编写 `TECH.md` 技术规格。当用户要求编写技术规格、实现计划，或与产品规格配套的架构文档时使用。
 ---
 
 # write-tech-spec

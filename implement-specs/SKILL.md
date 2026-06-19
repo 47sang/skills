@@ -1,6 +1,6 @@
 ---
 name: implement-specs
-description: Implement an approved feature from PRODUCT.md and TECH.md, keeping specs and code aligned in the same PR as implementation evolves. Use after the product and tech specs are approved and the next step is building the feature.
+description: 根据 `PRODUCT.md` 和 `TECH.md` 实现已批准的功能，并在实现演进过程中保持规格与代码在同一次提交（PR）中一致。当产品与技术规格已获批准、下一步开始构建功能时使用。
 ---
 
 # implement-specs

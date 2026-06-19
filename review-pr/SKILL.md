@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Review a pull request diff and write structured feedback to review.json for the workflow to publish. Use when reviewing a checked-out PR from local artifacts like pr_diff.txt and pr_description.txt and producing machine-readable review output instead of posting directly to GitHub.
+description: 评审拉取请求（PR）的差异，并将结构化反馈写入 `review.json` 供工作流发布。当基于 `pr_diff.txt`、`pr_description.txt` 等本地产物评审一个已签出的 PR，并需要产出机器可读的评审结果（而非直接发布到 GitHub）时使用。
 ---
 
 # PR 评审技能

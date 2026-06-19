@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Create a pull request in the current repository for the current branch. Use when the user mentions opening a PR, creating a pull request, submitting changes for review, or preparing code for merge.
+description: 在当前仓库中为当前分支创建拉取请求（PR）。当用户提到要开 PR、创建拉取请求、提交代码供评审，或准备合并代码时使用。
 ---
 
 # create-pr

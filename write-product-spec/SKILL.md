@@ -1,6 +1,6 @@
 ---
 name: write-product-spec
-description: Write a PRODUCT.md spec for a significant user-facing feature, focused on detailed behavior and validation. Use when the user asks for a product spec, desired behavior doc, or PRD, wants to define feature behavior before implementation, or when the feature is substantial or behaviorally ambiguous enough that a written spec would improve implementation or review.
+description: 为重要的面向用户功能编写 `PRODUCT.md` 规格说明，聚焦于详细的行为与验证。当用户要求编写产品规格、行为说明文档或产品需求文档（PRD），想在实现前定义功能行为，或功能足够重要、行为足够模糊以至于一份书面规格能改善实现与评审时使用。
 ---
 
 # write-product-spec

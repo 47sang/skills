@@ -1,6 +1,6 @@
 ---
 name: rust-unit-tests
-description: Write, improve, and run Rust unit tests. Covers crate-level unit tests, async tests, feature-flagged behavior, common helpers, and workspace-level test commands. Use when the user wants to add or refine unit tests, debug test failures, or set up testing conventions for a Rust project.
+description: 编写、改进并运行 Rust 单元测试，覆盖 crate 级单元测试、异步测试、特性开关（feature-flag）行为、通用辅助函数，以及工作区级别的测试命令。当用户想新增或完善单元测试、排查测试失败，或为 Rust 项目设定测试规范时使用。
 ---
 
 # Rust 单元测试

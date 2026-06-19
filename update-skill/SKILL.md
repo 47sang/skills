@@ -1,6 +1,6 @@
 ---
 name: update-skill
-description: Create or update skills by generating, editing, or refining SKILL.md files in this repository. Use when authoring new skills or revising the structure, frontmatter, or guidance for existing ones.
+description: 通过生成、编辑或优化本仓库中的 `SKILL.md` 文件来创建或更新技能。当编写新技能，或修订现有技能的结构、前置元数据（frontmatter）与说明时使用。
 ---
 
 # update-skill
@@ -14,7 +14,7 @@ description: Create or update skills by generating, editing, or refining SKILL.m
 ```markdown
 ---
 name: pdf-processing
-description: Extract text and tables from PDF files, fill forms, merge documents.
+description: 从 PDF 文件中提取文本和表格，填写表单，合并文档。
 ---
 
 # PDF 处理
@@ -100,6 +100,22 @@ skills-ref validate ./my-skill
 - `.agents/skills/add-feature-flag/SKILL.md` - 具有清晰顺序步骤的多步骤工作流程
 - `.agents/skills/rust-unit-tests/SKILL.md` - 具有代码示例和辅助工具的全面指南
 - `.agents/skills/remove-feature-flag/SKILL.md` - 具有搜索命令的清理工作流程
+
+## 同步 README 目录
+
+每次创建或更新技能后，**若存在 [~/.claude/skills/README.md](../README.md) 则同步更新它；若不存在则跳过此步骤**。它是整个技能库的总目录：顶部写有「当前共收录 N 个技能」的计数与若干分组，每个分组是一张表格，每行格式为：
+
+| 技能 | 主要功能 | 何时使用 |
+|---|---|---|
+| [skill-name](skill-name/SKILL.md) | 一句话说明做什么 | 一句话说明何时使用 |
+
+需要维护的内容：
+
+- **新增技能**：在合适的分组中追加一行（必要时新建分组，并在顶部目录补上锚点链接），并更新顶部的技能计数。
+- **更新技能**：若改动涉及 `description`、主要功能或适用场景，同步修改 README 对应行的「主要功能」与「何时使用」，保持两者语义一致。
+- **删除技能**：移除对应行并更新计数；若分组因此变空，一并删除该分组及其顶部目录链接。
+
+> README 中每行的描述应与该技能前置元数据里的中文 `description` 语义一致，但可更精炼。
 
 ## 最佳实践
 

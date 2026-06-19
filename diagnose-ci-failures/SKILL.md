@@ -1,6 +1,6 @@
 ---
 name: diagnose-ci-failures
-description: Diagnose CI failures for a PR using the GitHub CLI, extract error logs, and generate a plan to fix them. Use when the user asks to check CI status, pull CI issues, triage test failures, or investigate PR build failures.
+description: 使用 GitHub CLI 诊断 PR 的持续集成（CI）失败，提取错误日志并生成修复计划。当用户要求检查 CI 状态、拉取 CI 问题、分诊测试失败，或排查 PR 构建失败时使用。
 ---
 
 # diagnose-ci-failures
