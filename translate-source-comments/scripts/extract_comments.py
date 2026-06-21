@@ -10,15 +10,16 @@
     {
       "id": "C00000",
       "file": "相对项目根的路径",
-      "type": "javadoc" | "inline",
+      "type": "javadoc" | "inline" | "yaml",
       "start": 起始行号(从1开始),
       "end":   结束行号(从1开始),
       "indent": "    ",          # 仅 javadoc，用于重建时的缩进
+      "javadoc_close_col": 42,   # 仅 javadoc，单行 /** ... */ 的 */ 列位置(0基)，用于精确回写
       "source": "原文..."
     }
 
 设计原则:
-- 已包含中文字符的文件整体跳过（视为已翻译）。
+- 已包含中文字符的注释条目跳过（逐条检测，非文件级跳过）。
 - License 头部（前 20 行内的 Copyright / Apache License / 链接）跳过。
 - 只提取注释文本，不碰代码、字符串字面量。
 """
@@ -26,48 +27,9 @@
 import argparse
 import json
 import os
-import re
 import sys
 
-HAS_CHINESE = re.compile(r"[一-鿿]")
-
-
-def has_chinese(text: str) -> bool:
-    return bool(HAS_CHINESE.search(text))
-
-
-def is_license_line(line: str, idx: int) -> bool:
-    """判断某一行是否属于文件顶部的 License 头部。"""
-    if idx >= 20:
-        return False
-    s = line.strip()
-    if s.startswith("/*") or s.startswith("*"):
-        return True
-    markers = (
-        "Copyright",
-        "Licensed under the Apache License",
-        "http://www.apache.org/licenses",
-        "limitations under the License",
-        "distributed under the License",
-    )
-    return any(m in s for m in markers)
-
-
-def find_inline_comment_pos(line: str) -> int:
-    """返回 // 在字符串字面量之外的位置，找不到返回 -1。"""
-    in_str = False
-    str_char = None
-    for i, ch in enumerate(line):
-        if ch in ('"', "'") and (i == 0 or line[i - 1] != "\\"):
-            if not in_str:
-                in_str = True
-                str_char = ch
-            elif str_char == ch:
-                in_str = False
-                str_char = None
-        elif ch == "/" and i + 1 < len(line) and line[i + 1] == "/" and not in_str:
-            return i
-    return -1
+from utils import find_inline_comment_pos, has_chinese, is_license_line
 
 
 def _content_after_star(line: str) -> str:
@@ -80,7 +42,7 @@ def _content_after_star(line: str) -> str:
     idx = line.find("*")
     if idx == -1:
         return line.strip()
-    return line[idx + 1 :].rstrip()
+    return line[idx + 1:].rstrip()
 
 
 def extract_javadoc_inner(jd_lines):
@@ -140,6 +102,7 @@ def extract_java_file(filepath: str, project_root: str):
     while i < len(lines):
         line = lines[i]
 
+        # ---- License 行跳过 ----
         if is_license_line(line, i):
             i += 1
             continue
@@ -152,12 +115,14 @@ def extract_java_file(filepath: str, project_root: str):
         # ---- Javadoc 块 ----
         if "/**" in line:
             after_open = line.split("/**", 1)[1]
-            # 单行 Javadoc: /** text */ （同行闭合，不能误吞后续代码）
+            # 单行 Javadoc: /** text */ （同行闭合）
             if "*/" in after_open:
                 if not has_chinese(line):
                     inner = extract_javadoc_inner([line])
                     if inner:
                         indent = line[: len(line) - len(line.lstrip())]
+                        # 记录 */ 在行内的列位置（0基），用于精确回写
+                        close_col = line.index("*/") - 1  # 指向 * 的位置
                         comments.append(
                             {
                                 "id": f"C{len(comments):05d}",
@@ -166,13 +131,14 @@ def extract_java_file(filepath: str, project_root: str):
                                 "start": i + 1,
                                 "end": i + 1,
                                 "indent": indent,
+                                "javadoc_close_col": close_col,
                                 "source": "\n".join(inner),
                             }
                         )
                 i += 1
                 continue
 
-            # 多行 Javadoc
+            # 多行 Javadoc：收集直到闭合 */
             block = [line]
             j = i + 1
             closed = False
@@ -186,7 +152,9 @@ def extract_java_file(filepath: str, project_root: str):
 
             if closed:
                 full_block = "".join(block)
-                if not has_chinese(full_block):
+                # 逐条检测：块内整体有中文则跳过整个块
+                block_has_chinese = has_chinese(full_block)
+                if not block_has_chinese:
                     inner = extract_javadoc_inner(block)
                     if inner:  # 跳过空注释 /** */
                         indent = line[: len(line) - len(line.lstrip())]
@@ -198,16 +166,25 @@ def extract_java_file(filepath: str, project_root: str):
                                 "start": i + 1,
                                 "end": j,
                                 "indent": indent,
+                                "javadoc_close_col": -1,  # 多行块，不需要
                                 "source": "\n".join(inner),
                             }
                         )
+                i = j
+                continue
+            else:
+                # 未闭合的 Javadoc：输出警告并跳过
+                print(
+                    f"  ⚠ 未闭合的 Javadoc，跳过: {rel}:{i + 1}",
+                    file=sys.stderr,
+                )
                 i = j
                 continue
 
         # ---- 行内注释 ----
         cpos = find_inline_comment_pos(line)
         if cpos >= 0:
-            text = line[cpos + 2 :].rstrip("\n")
+            text = line[cpos + 2:].rstrip("\n")
             if text.strip() and not has_chinese(text):
                 comments.append(
                     {
@@ -227,7 +204,7 @@ def extract_java_file(filepath: str, project_root: str):
 
 
 def extract_yaml_file(filepath: str, project_root: str):
-    """YAML 只提取注释行（以 # 开头），跳过已含中文的行。"""
+    """YAML 只提取注释行（以 # 开头），跳过已含中文的行和 License 行。"""
     comments = []
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -235,9 +212,15 @@ def extract_yaml_file(filepath: str, project_root: str):
     except Exception:
         return comments
 
+    full = "".join(lines)
+    if has_chinese(full):
+        return comments  # 整个文件已含中文，跳过
+
     rel = os.path.relpath(filepath, project_root)
     for i, line in enumerate(lines):
         s = line.strip()
+        if is_license_line(line, i):
+            continue
         if s.startswith("#"):
             text = s[1:].strip()
             if text and not has_chinese(text):
@@ -271,7 +254,7 @@ def main():
         files = [ln.strip() for ln in f if ln.strip()]
 
     all_comments = []
-    scanned = translated = 0
+    scanned = skipped_chinese = 0
     for fp in files:
         if not os.path.exists(fp):
             continue
@@ -285,7 +268,7 @@ def main():
         if cs:
             all_comments.extend(cs)
         else:
-            translated += 1  # 已含中文，跳过
+            skipped_chinese += 1  # 已含中文或无注释，跳过
 
     # 重新编号（全局连续）
     for idx, c in enumerate(all_comments):
@@ -296,7 +279,7 @@ def main():
 
     total = len(all_comments)
     print(f"扫描文件: {scanned}")
-    print(f"已含中文跳过: {translated}")
+    print(f"已含中文/无注释跳过: {skipped_chinese}")
     print(f"待翻译注释条数: {total}")
     by_type = {}
     for c in all_comments:

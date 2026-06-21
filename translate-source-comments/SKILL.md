@@ -100,12 +100,18 @@ git diff --stat
 
 ## 📐 工作流原理（理解脚本行为）
 
-- **提取**：对每个 Javadoc 块，记录起始/结束行号与缩进，把 `*` 之后的内容抽成纯文本。已含中文的文件整体跳过。
+- **提取**：对每个 Javadoc 块，记录起始/结束行号与缩进，把 `*` 之后的内容抽成纯文本。已含中文的注释条目逐条跳过（非文件级跳过）。
+- **安全特性**：
+  - `find_inline_comment_pos` 正确处理 Java 17 文本块（`"""..."""`）和转义引号，不会误把文本块内的 `//` 当作行内注释
+  - Javadoc 块收集跟踪引号状态，字符串内的 `*/` 不会导致提前截断
+  - `apply_translations.py` 对每条译文做合法性校验（必须含中文、不含 URL 等），未通过的条目跳过并打印警告
+  - 中文检测覆盖 CJK 基本区 + 扩展 A 区 + 全角标点
 - **重建**：`apply` 把译文按标准格式重建（`/**` 单独一行 → 内容每行加 ` * ` 前缀 → ` */` 结尾），缩进从提取时记录的 `indent` 恢复。**单行 `/** x */` 会被标准化为多行**——这是预期行为，符合 google-java-format，跑 `spotless:apply` 即可统一。
-- **行号安全**：同一文件按起始行号从后往前应用，避免行号位移错乱。
+- **行号安全**：同一文件按起始行号从后往前应用，避免行号位移错乱。应用前检查行号有效性，越界条目跳过。
 
 ## 📁 文件说明
 
+- `scripts/utils.py` — 共享工具函数（`find_inline_comment_pos`、`has_chinese`、`is_license_line`），被 extract 和 apply 共同 import
 - `scripts/extract_comments.py` — 提取注释为 JSON（支持 `--yaml` 同时处理 YAML）
 - `scripts/split_comments.py` — 切小批次，便于分批翻译
 - `scripts/apply_translations.py` — 把译文写回源文件

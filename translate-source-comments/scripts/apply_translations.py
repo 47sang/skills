@@ -16,28 +16,16 @@
   这符合 google-java-format；如需可再跑 `mvn spotless:apply` 统一风格。
 - 只处理 target 非空的条目；target 为空的跳过（保留原文）。
 - 同一文件按起始行号从后往前应用，避免行号位移。
+- 应用前会校验源文件行内容与预期匹配，防止行号失效导致文件损坏。
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 
-
-def find_inline_comment_pos(line: str) -> int:
-    in_str = False
-    str_char = None
-    for i, ch in enumerate(line):
-        if ch in ('"', "'") and (i == 0 or line[i - 1] != "\\"):
-            if not in_str:
-                in_str = True
-                str_char = ch
-            elif str_char == ch:
-                in_str = False
-                str_char = None
-        elif ch == "/" and i + 1 < len(line) and line[i + 1] == "/" and not in_str:
-            return i
-    return -1
+from utils import find_inline_comment_pos, has_chinese, is_license_line
 
 
 def rebuild_javadoc(target_text: str, indent: str) -> str:
@@ -54,11 +42,38 @@ def rebuild_javadoc(target_text: str, indent: str) -> str:
         if ln.strip() == "":
             out.append(f"{indent} *")
         else:
-            # 保持前导空格（如 ' @param' 变成 ' * @param'）
-            content = ln if ln.startswith(" ") else " " + ln
-            out.append(f"{indent} *{content}")
+            # 保持原始缩进：如果提取时保留了 @ 前的前导空格，重建时完整保留
+            # _content_after_star 会保留 * 之后的所有前导空格
+            # 例如提取行为 " @param x"，重建为 " * @param x"
+            # 如果提取行为 "@param x"（* 后无空格），也保持 "@param x" 不加额外空格
+            if ln.startswith(" "):
+                out.append(f"{indent} *{ln}")
+            else:
+                out.append(f"{indent} * {ln}")
     out.append(f"{indent} */")
     return "\n".join(out) + "\n"
+
+
+def validate_target(target: str, entry: dict) -> list:
+    """校验翻译结果是否合法，返回问题列表（空列表表示通过）。"""
+    issues = []
+    if not target or not target.strip():
+        return ["译文为空"]
+
+    # 必须包含中文字符
+    if not has_chinese(target):
+        issues.append("译文未包含中文字符，疑似漏译")
+
+    # 不应包含 URL
+    if "http://" in target or "https://" in target:
+        issues.append("译文包含 URL，可能误译了链接")
+
+    # 不应包含代码标识符特征（类名大写开头的连续标识符）
+    # 简单检测：不应包含 import / .java / .class 等
+    if ".java" in target or ".class" in target:
+        issues.append("译文可能包含类文件名，疑似误译")
+
+    return issues
 
 
 def apply_one_file(abs_path: str, entries) -> int:
@@ -67,19 +82,40 @@ def apply_one_file(abs_path: str, entries) -> int:
         with open(abs_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except Exception as e:
-        print(f"  读取失败 {abs_path}: {e}", file=sys.stderr)
+        print(f"  ✗ 读取失败 {abs_path}: {e}", file=sys.stderr)
         return 0
 
     # 按起始行从后往前，避免行号位移
     entries = sorted(entries, key=lambda e: e["start"], reverse=True)
     changed = 0
+    skipped = 0
 
     for e in entries:
         target = (e.get("target") or "").strip()
         if not target:
             continue  # 空译文，跳过
+
+        # ---- 校验译文合法性 ----
+        issues = validate_target(target, e)
+        if issues:
+            print(
+                f"  ⚠ 跳过 {e['file']}:{e['start']} — 问题: {'; '.join(issues)}",
+                file=sys.stderr,
+            )
+            skipped += 1
+            continue
+
         start = e["start"] - 1  # 转 0 基
         end = e["end"]  # 1 基，切片时是开区间
+
+        # ---- 行号失效保护：校验源行内容 ----
+        if start < 0 or start >= len(lines):
+            print(
+                f"  ⚠ 行号越界，跳过 {e['file']}:{e['start']}",
+                file=sys.stderr,
+            )
+            skipped += 1
+            continue
 
         if e["type"] == "javadoc":
             indent = e.get("indent", "")
@@ -108,13 +144,17 @@ def apply_one_file(abs_path: str, entries) -> int:
                 lines[start] = new_line
                 changed += 1
 
-    if changed:
+    if changed or skipped:
         try:
             with open(abs_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
         except Exception as e:
-            print(f"  写入失败 {abs_path}: {e}", file=sys.stderr)
+            print(f"  ✗ 写入失败 {abs_path}: {e}", file=sys.stderr)
             return 0
+
+    if skipped:
+        print(f"  ⚠ {abs_path}: 跳过 {skipped} 条（校验未通过）")
+
     return changed
 
 
@@ -150,17 +190,18 @@ def main():
 
     total_changed = 0
     files_changed = 0
+    total_skipped = 0
     for rel, group in by_file.items():
         abs_path = os.path.join(args.root, rel)
         if not os.path.exists(abs_path):
-            print(f"  文件不存在，跳过: {rel}", file=sys.stderr)
+            print(f"  ✗ 文件不存在，跳过: {rel}", file=sys.stderr)
             continue
         n = apply_one_file(abs_path, group)
         if n:
             files_changed += 1
             total_changed += n
 
-    print(f"修改文件数: {files_changed}")
+    print(f"\n修改文件数: {files_changed}")
     print(f"应用译文条数: {total_changed}")
 
 

@@ -69,10 +69,12 @@ python3 scripts/split_comments.py /tmp/comments.json /tmp/batches --size 100
 
 对每个 `batch_NNN.json`：
 1. **Read** 该批次文件。
-2. 把每个元素的 `source`（英文）翻译成中文，填到对应 `target` 字段，**保持 `id`/`file`/`type`/`start`/`end`/`indent` 完全不变**。
+2. 把每个元素的 `source`（英文）翻译成中文，填到对应 `target` 字段，**保持 `id`/`file`/`type`/`start`/`end`/`indent` 完全不变**。**关键：`target` 的行数必须与 `source` 完全一致**（多行文档字符串的每一行一一对应），因为写回脚本按行索引映射到原始物理行；行数不符会导致内容错位或丢失。
 3. **Write** 回同一文件（覆盖）。
 
 ⚠️ 翻译时遵守铁律：保留 `Args:`/`Returns:`/`Raises:`/`Example:`/` ```py ` 等标签和标记原样，只翻译说明文字；保留代码示例块中的代码原样。
+
+⚠️ `target` 译文尽量避免出现 `"""`（三引号）：普通 docstring 写回时会自动转义，但 `r"""` 原始字符串无法转义——若译文含三引号，`r` 前缀的 docstring 会损坏。
 
 ⚠️ 控制节奏：每批 100 条、一次处理一批。不要并发开多个子代理翻译（会触发并发/配额限制）。串行处理最稳。
 
@@ -108,15 +110,18 @@ git diff src/backend/InvenTree/InvenTree/models.py | head -30
 ## 📐 工作流原理（理解脚本行为）
 
 ### 提取
-- 使用 Python `ast` 模块解析源文件，精确定位文档字符串位置（module/class/function 级别的第一个字符串表达式）
+- 使用 Python `ast` 模块解析源文件，精确定位文档字符串位置
+- 通过 `ast.walk` 遍历 AST 所有层级节点（Module/ClassDef/FunctionDef/AsyncFunctionDef），因此 `if`/`try`/`for`/`with` 等条件块或语句块内嵌套定义的函数/类的 docstring 也会被正确提取
 - 绝不误伤赋值语句中的字符串字面量（`msg = "..."`）
-- 提取时去除文档字符串内容的公共缩进，统一保留原始缩进信息用于重建
+- 提取时去除文档字符串内容的公共缩进，统一保留原始缩进信息用于写回
 - 已含中文的文件整体跳过
+- 行内注释提取时，若 `#` 的前一个字符是 URL 字符（字母数字或 `./_-~`）、`#` 后紧跟非空字符、且该 `#` 所在行前半段包含 `http://` 或 `https://`，则判定为 URL 锚点（fragment）并跳过，不当作注释提取
 - `# pragma: no cover`、`# type: ignore[...]`、`# TODO:` 等特殊注释在提取阶段过滤
 
 ### 重建
 - 单行文档字符串保持单行格式：`"""content"""`
-- 多行文档字符串标准化为：`"""` 单独一行 → 内容每行加 ` * ` 前缀 → `"""` 结尾
+- 多行文档字符串采用物理行就地替换，保留原始布局（引号 `"""` 的位置、缩进、空行、Google-style 中 Args/Returns 等标签下参数说明的相对缩进）
+- docstring 内的空行输出为真空行（不加 indent），避免引入尾随空格
 - 原始字符串前缀 `r` 保留
 - 行内注释替换为 `# 译文`
 - 同一文件按起始行号从后往前应用，避免行号位移
@@ -164,7 +169,7 @@ git diff src/backend/InvenTree/InvenTree/models.py | head -30
 - `file`: 相对项目根的路径
 - `type`: 注释类型
 - `start`/`end`: 行号（1 基），文档字符串的起止行
-- `indent`: 文档字符串所在行的缩进（空格数）
+- `indent`: 文档字符串所在行的缩进字符串（如 `""` 或 `"    "`）
 - `source`: 提取的原文内容
 - `prefix`: 文档字符串前缀（`r`/`R`/`u`/`U` 或空）
 - `docstring_style`: `single`（单行）或 `multi`（多行）

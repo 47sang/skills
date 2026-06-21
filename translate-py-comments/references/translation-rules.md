@@ -57,6 +57,7 @@ InvenTree - An open-source inventory management system
 - 正则表达式模式（尤其 docstring 中的示例正则）
 - 格式占位符：`%s`、`%d`、`{ref}`、`{0}`、`{name:04d}`
 - **这些绝不能加空格、改大小写、动格式**
+- **URL 锚点（如 `https://example.com/path#section` 中的 `#section`）在提取阶段已被自动跳过，不会被误判为行内注释**。
 
 ### 2.5 Python 文档字符串标签
 保留原样（不翻译标签本身）：
@@ -364,4 +365,4 @@ if not unit:
 | 翻译代码行中的类名 | `class FilterableSerializerMixin` → `class 可过滤序列化器混入` | **不翻译**，代码标识符不动 |
 | 翻译导入语句 | `from django.db import models` → `从 django.db 导入 模型` | **不翻译** |
 | 修改 `# pragma: no cover` | 当作普通注释翻译 | **提取阶段已过滤** |
-| 把 `"""` 放到代码同一行 | 重建时改变 inline docstring 的原始格式 | 多行 docstring 统一用 `"""` 独占一行的格式 |
+| 把 `"""` 放到代码同一行 | 重建时改变 docstring 的原始物理布局 | 多行 docstring 采用物理行就地替换，保留原始布局（引号位置、缩进、空行、Args 子项的相对缩进） |
