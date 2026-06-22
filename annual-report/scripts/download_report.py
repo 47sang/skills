@@ -104,11 +104,37 @@ def _query_reports(symbol: str, org_id: str, searchkey: str, start_date: str, en
         anns = data.get("announcements", [])
         for a in anns:
             title = a.get("announcementTitle", "")
-            # 过滤掉摘要，只保留正文
+            # 过滤掉摘要、英文版和非报告类公告
             if "摘要" in title:
                 continue
-            # 优先取中文版，跳过英文版（英文版通常公告时间更晚，会排在前面）
             if "英文版" in title:
+                continue
+            # 半年度报告的标题在巨潮中是"半<em>年度报告</em>"，
+            # "半年度报告"被<em>标签打断，需要用正则匹配
+            if re.search(r'半(?:<[^>]+>)*年度(?:<[^>]+>)*报告', title):
+                continue
+            # 过滤各种非报告正文的公告（均含"年度报告"关键字但非正文）
+            if "披露提示性公告" in title:
+                continue
+            if "业绩说明会" in title:
+                continue
+            if "更正公告" in title:
+                continue
+            if "董事会决议公告" in title:
+                continue
+            if "监事会决议公告" in title:
+                continue
+            if "持续督导年度报告书" in title:
+                continue
+            if "持续督导" in title:
+                continue
+            if "监管问询函" in title:
+                continue
+            if "募集说明书" in title:
+                continue
+            if "专项核查意见" in title:
+                continue
+            if "核查意见" in title:
                 continue
             url = BASE_URL + a.get("adjunctUrl", "")
             size = int(a.get("adjunctSize", 0) or 0)
