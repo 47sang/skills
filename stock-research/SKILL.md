@@ -27,14 +27,14 @@ description: A股股票数据查询与投研报告生成。使用 akshare 获取
 
 ### fetch_stock_data.py — 获取股票基本面数据
 ```bash
-python3 /Users/zhou/.hermes/skills/openclaw-imports/stock-research/scripts/fetch_stock_data.py <股票代码>
+python3 /Users/zhou/.hermes/skills/stock-research/scripts/fetch_stock_data.py <股票代码>
 ```
 
 输出：公司简介 + 核心财务数据 + 实时行情，同时保存 JSON 到 `/tmp/`
 
 ### read_pdf.py — 读取年报 PDF（来自 annual-report skill）
 ```bash
-python3 /Users/zhou/.hermes/skills/openclaw-imports/annual-report/scripts/read_pdf.py <PDF路径> [起始页] [结束页] [关键词]
+python3 /Users/zhou/.hermes/skills/annual-report/scripts/read_pdf.py <PDF路径> [起始页] [结束页] [关键词]
 ```
 **注意**：直接使用系统 python3，无需激活虚拟环境。
 
