@@ -2,7 +2,7 @@
 
 本仓库是一组可被 Claude Code 自动加载与调用的技能集合。每个技能是一个独立目录，内含一份 `SKILL.md`（YAML 前置元数据 + Markdown 正文），说明「做什么、何时用、怎么做」。
 
-当前共收录 **15** 个技能，按功能归为以下 8 组。进入项目时可直接对照下表定位；点击技能名可跳转到对应的 `SKILL.md`。使用时无需手动指定——在对话中说出对应意图（如「帮我评审这个 PR」「分析一下这个开源项目」），相关技能会被自动触发。
+当前共收录 **16** 个技能，按功能归为以下 8 组。进入项目时可直接对照下表定位；点击技能名可跳转到对应的 `SKILL.md`。使用时无需手动指定——在对话中说出对应意图（如「帮我评审这个 PR」「分析一下这个开源项目」），相关技能会被自动触发。
 
 ## 目录
 
@@ -26,10 +26,11 @@
 
 ## 📐 规格驱动开发
 
-一条「先写规格、再写代码」的工作流：用 `write-product-spec` / `write-tech-spec` 产出 `PRODUCT.md` / `TECH.md`，用 `implement-specs` 落地实现，`spec-driven-implementation` 负责整体编排与保持规格同步。
+一条「先捕获意图、再写规格、最后写代码」的产物链工作流：用 `capture-intent` 快速记录原始想法，用 `write-product-spec` / `write-tech-spec` 产出 `PRODUCT.md` / `TECH.md`，用 `implement-specs` 落地实现，`spec-driven-implementation` 负责整体编排与保持规格同步。
 
 | 技能 | 主要功能 | 何时使用 |
 |---|---|---|
+| [capture-intent](capture-intent/SKILL.md) | 快速捕获功能意图，在 `specs/NN-xxx/` 下创建 `intent.md` | 用户描述新功能或改进想法时，产物链的起点 |
 | [spec-driven-implementation](spec-driven-implementation/SKILL.md) | 驱动规格优先工作流，让 `PRODUCT.md` / `TECH.md` 随实现演进并签入源码 | 启动重要功能、规划智能体（agent）驱动的开发 |
 | [write-product-spec](write-product-spec/SKILL.md) | 编写 `PRODUCT.md`，从用户视角描述功能行为与验证条件 | 定义功能行为、编写产品需求文档（PRD） |
 | [write-tech-spec](write-tech-spec/SKILL.md) | 编写 `TECH.md`，把产品意图转化为贴合现有代码库的实现计划 | 做技术实现计划、架构设计文档 |
