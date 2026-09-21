@@ -21,6 +21,7 @@ description: 根据 `PRODUCT.md` 和 `TECH.md` 实现已批准的功能，并在
 - 确认 `PRODUCT.md` 存在
 - 当功能需要一个时，确认 `TECH.md` 存在
 - 确认相关规格已被评审和批准到足以开始实现的程度
+  - **🤖 2026-09-21 起（判断门落点 D）**：小功能可经规格分诊路由 `auto_start`（`python3 scripts/hooks/jev_gate.py spec --file 摘要.json`）视为已批准，直接开工——用户在批量验收时一并审阅落库的规格；`escalate` 或判断门不可用时仍需用户明确批准
 
 ## 工作流程
 
