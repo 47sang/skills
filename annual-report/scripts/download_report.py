@@ -3,361 +3,282 @@
 download_report.py - 下载 A 股定期报告 PDF（巨潮资讯）
 
 用法：
+    单只：
     python3 download_report.py <股票代码> <报告类型> [年份] [保存目录]
-    python3 download_report.py 300750 年度报告
+    python3 download_report.py 300750 年报
     python3 download_report.py 300750 一季报 2026
     python3 download_report.py 300750 年报 2025 /tmp/
 
-不指定年份时默认使用当前年份。
-报告类型支持：年度报告、半年度报告、一季度报告、三季度报告（支持简写：年报、半年报、一季报、三季报）
+    批量：
+    python3 download_report.py --batch <清单文件> [选项]
+    python3 download_report.py --batch todo.json --types 年报,一季报 --base-dir /path/年报PDF
+    python3 download_report.py --batch todo.json --types 半年报 --check-only
+
+不指定年份时默认使用当前年份；不指定年份的批量任务取「最新公布」的一期。
+
+清单文件为 JSON 数组，每项形如：
+    [{"name": "宁德时代", "symbol": "300750"}, ...]
+仅写 symbol 也可以，name 会自动用巨潮官方简称补齐：
+    ["300750", "300308", ...]
+
+设计说明（相对旧版的修复点见 cninfo_common.py 顶部注释）：
+  - 「年度报告」与「半年度报告」的子串混淆已修复，去高亮标签后再做双向排除
+  - 港股重复披露的「港股公告：XXXX年报」已排除，不再下到无文字层的扫描版
+  - 指定年份时按标题年份精确筛选，筛选无命中直接报「未找到」，不再静默回退
+  - 公司简称取自巨潮 topSearch 接口，不再依赖 akshare 私有函数
+  - column 参数按交易所自动选择，沪市/科创板不再漏结果
+  - 每份 PDF 下载后用 pdftotext 校验首页标题，校验不通过自动换候选并删除错文件
+  - 新增 --batch 批量模式：一份清单可覆盖上百家公司，支持仅补缺失、强制重下、只检查不下载
 """
 
-import sys
+import argparse
+import json
 import os
-import re
-import requests
-import math
-from datetime import datetime
+import subprocess
+import sys
+import time
 
-# ---------- 配置 ----------
-QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
-BASE_URL = "http://static.cninfo.com.cn/"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "X-Requested-With": "XMLHttpRequest",
-}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-KEYWORD_MAP = {
-    "年报": "年度报告",
-    "年度": "年度报告",
-    "年度报告": "年度报告",
-    "半年报": "半年度报告",
-    "半年度": "半年度报告",
-    "半年度报告": "半年度报告",
-    "一季报": "一季度报告",
-    "一季度": "一季度报告",
-    "一季度报告": "一季度报告",
-    "三季报": "三季度报告",
-    "三季度": "三季度报告",
-    "三季度报告": "三季度报告",
-}
-
-REPORT_TYPE_NAME = {
-    "年度报告": "年度报告",
-    "半年度报告": "半年度报告",
-    "一季度报告": "一季度报告",
-    "三季度报告": "三季度报告",
-}
+import cninfo_common as cc
 
 
-def _get_org_id(symbol: str) -> str:
+def _resolve_targets(items):
     """
-    根据股票代码获取 orgId（巨潮资讯内部标识）。
-    优先通过巨潮 topSearch 接口获取，akshare 私有函数已废弃。
+    把清单里的每一项解析为 (公司简称, 证券代码)。
+
+    入参 items：dict 列表、字符串列表，或二者混合。
+    返回：解析成功的 (name, symbol) 列表。
+    异常：某项无法解析时抛 ValueError，由调用方决定跳过还是整体失败。
     """
-    url = "http://www.cninfo.com.cn/new/information/topSearch/query"
-    payload = {"keyWord": symbol, "maxNum": 5}
-    r = requests.post(url, data=payload, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    result = r.json()
-    if not result or not isinstance(result, list):
-        raise ValueError(f"无法获取 {symbol} 的 orgId，topSearch 返回异常。")
-    for item in result:
-        if item.get("code") == symbol:
-            return item["orgId"]
-    raise ValueError(f"无法获取 {symbol} 的 orgId，请手动查询后在脚本中添加映射。")
+    out = []
+    for it in items:
+        if isinstance(it, str):
+            out.append((None, it.strip()))
+        elif isinstance(it, dict):
+            symbol = str(it.get("symbol") or it.get("code") or "").strip()
+            name = (it.get("name") or it.get("stock_name") or "").strip() or None
+            if not symbol:
+                raise ValueError(f"清单项缺少股票代码：{it}")
+            out.append((name, symbol))
+        else:
+            raise ValueError(f"清单项格式无法识别：{it!r}")
+    return out
 
 
-def _query_reports(symbol: str, org_id: str, searchkey: str, start_date: str, end_date: str, page_size: int = 50) -> list:
-    """查询指定关键词的报告列表，返回 [(标题, PDF完整URL, 大小KB, 公告ID), ...]"""
-    payload = {
-        "pageNum": "1",
-        "pageSize": str(page_size),
-        "column": "szse",
-        "tabName": "fulltext",
-        "plate": "",
-        "stock": f"{symbol},{org_id}",
-        "searchkey": searchkey,
-        "secid": "",
-        "category": "",
-        "trade": "",
-        "seDate": f"{start_date}~{end_date}",
-        "sortName": "",
-        "sortType": "",
-        "isHLtitle": "true",
-    }
-    r = requests.post(QUERY_URL, data=payload, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    total = int(data.get("totalAnnouncement", 0))
-    if total == 0:
-        return []
-
-    page_num = math.ceil(total / page_size)
-    results = []
-    for page in range(1, page_num + 1):
-        payload["pageNum"] = str(page)
-        r = requests.post(QUERY_URL, data=payload, headers=HEADERS, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        anns = data.get("announcements", [])
-        for a in anns:
-            title = a.get("announcementTitle", "")
-            # 过滤掉摘要、英文版和非报告类公告
-            if "摘要" in title:
-                continue
-            if "英文版" in title:
-                continue
-            # 半年度报告的标题在巨潮中是"半<em>年度报告</em>"，
-            # "半年度报告"被<em>标签打断，需要用正则匹配
-            if re.search(r'半(?:<[^>]+>)*年度(?:<[^>]+>)*报告', title):
-                continue
-            # 过滤各种非报告正文的公告（均含"年度报告"关键字但非正文）
-            if "披露提示性公告" in title:
-                continue
-            if "业绩说明会" in title:
-                continue
-            if "更正公告" in title:
-                continue
-            if "董事会决议公告" in title:
-                continue
-            if "监事会决议公告" in title:
-                continue
-            if "持续督导年度报告书" in title:
-                continue
-            if "持续督导" in title:
-                continue
-            if "监管问询函" in title:
-                continue
-            if "募集说明书" in title:
-                continue
-            if "专项核查意见" in title:
-                continue
-            if "核查意见" in title:
-                continue
-            url = BASE_URL + a.get("adjunctUrl", "")
-            size = int(a.get("adjunctSize", 0) or 0)
-            ann_id = a.get("announcementId", "")
-            results.append((title, url, size, ann_id))
-
-    # 去重（同一期报告可能返回多份）
-    seen = set()
-    unique = []
-    for item in results:
-        key = item[0]
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
-
-
-def _make_standard_filename(stock_name: str, symbol: str, year: str, report_type_key: str) -> str:
-    """生成标准文件名"""
-    report_name = REPORT_TYPE_NAME.get(report_type_key, report_type_key)
-    return f"{stock_name}_{symbol}_{year}年{report_name}.pdf"
-
-
-def _find_latest_annual_report(symbol: str, org_id: str) -> tuple:
+def _batch(args):
     """
-    查找最新的一份年报（正文，排除摘要），返回 (标题, PDF完整URL, 大小KB, 年份) 或 None。
+    批量下载入口。
+
+    入参 args：argparse 解析后的命名空间，需含 batch/types/base_dir/force/check_only/interval。
+    返回：进程退出码，0 表示全部成功或有据可查的失败，1 表示清单不可用。
     """
-    # 年报在次年3-4月发布，搜索范围跨两个年度以覆盖
-    from datetime import datetime
-    current_year = datetime.now().year
-    start_date = f"{current_year - 2}-01-01"
-    end_date = f"{current_year + 1}-12-31"
-    reports = _query_reports(symbol, org_id, "年度报告", start_date, end_date)
-    if not reports:
-        return None
-    # 取最新一份（_query_reports 已按公告时间倒序）
-    title, pdf_url, size_kb, _ = reports[0]
-    # 从标题中提取年份
-    import re
-    m = re.search(r"(\d{4})年", title.replace("<em>", "").replace("</em>", ""))
-    year = m.group(1) if m else str(current_year)
-    return (title, pdf_url, size_kb, year)
-
-
-def _download_file(url: str, dest_path: str) -> tuple:
-    """下载文件到指定路径，返回 (成功?, 实际大小KB)"""
     try:
-        r = requests.get(url, headers={"User-Agent": HEADERS["User-Agent"]}, timeout=60, stream=True)
-        r.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        size = os.path.getsize(dest_path)
-        return True, size
+        with open(args.batch, encoding="utf-8") as f:
+            raw = json.load(f)
     except Exception as e:
-        # 清理不完整文件
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
-        return False, str(e)
+        print(f"❌ 读取清单失败：{e}")
+        return 1
+    if isinstance(raw, dict):
+        raw = raw.get("items") or raw.get("stocks") or []
+    if not isinstance(raw, list) or not raw:
+        print("❌ 清单为空或格式不是数组")
+        return 1
+
+    try:
+        targets = _resolve_targets(raw)
+        report_keys = cc.parse_types(args.types)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return 1
+
+    years = [args.year] if args.year else [str(time.localtime().tm_year), str(time.localtime().tm_year - 1)]
+
+    base_dir = args.base_dir
+    if not base_dir:
+        print("❌ 批量模式必须用 --base-dir 指定公司目录的父目录")
+        return 1
+
+    print(f"批量任务：{len(targets)} 家公司 × 报告类型 {report_keys} × 年份 {years}")
+    if args.check_only:
+        print("模式：仅检查（不下载），用于盘点缺失")
+    print("-" * 72)
+
+    ok_count = miss_count = err_count = 0
+    records = []
+    for idx, (name, symbol) in enumerate(targets, 1):
+        try:
+            org_id, official_name = cc.get_org_info(symbol)
+        except cc.ReportError as e:
+            print(f"[{idx}/{len(targets)}] {symbol} ❌ {e}")
+            err_count += 1
+            records.append({"symbol": symbol, "name": name, "error": str(e)})
+            continue
+
+        final_name = name or official_name
+        # 简称不一致时提示但不阻断：本地目录名以用户既有命名为准
+        note = ""
+        if name and official_name and name != official_name:
+            note = f"（巨潮现用简称「{official_name}」）"
+
+        dest_dir = os.path.join(base_dir, final_name)
+        statuses = []
+        for rk in report_keys:
+            for year in years:
+                if args.check_only:
+                    fn = cc.make_filename(final_name, symbol, year, rk)
+                    path = os.path.join(dest_dir, fn)
+                    if os.path.exists(path):
+                        statuses.append((rk, year, "exists", fn))
+                    else:
+                        statuses.append((rk, year, "missing", fn))
+                    continue
+                try:
+                    res = cc.fetch_report(
+                        symbol, org_id, rk, year, dest_dir,
+                        stock_name=final_name, verify=not args.no_verify, force=args.force,
+                    )
+                    statuses.append((rk, year, res["status"], res["message"]))
+                except cc.ReportError as e:
+                    statuses.append((rk, year, "error", str(e)))
+                time.sleep(args.interval)
+
+        marks = {"downloaded": "✅", "exists": "⏭", "missing": "❓",
+                 "not_found": "➖", "verify_failed": "⚠️", "error": "❌"}
+        line = " ".join(f"{marks.get(s, '?')}{rk[:2]}{year}:{s}" for rk, year, s, _ in statuses)
+        print(f"[{idx}/{len(targets)}] {final_name}({symbol}) {note} {line}")
+
+        for rk, year, st, msg in statuses:
+            if st in ("downloaded", "exists"):
+                ok_count += 1
+            elif st in ("not_found", "missing"):
+                miss_count += 1
+            else:
+                err_count += 1
+            records.append({"symbol": symbol, "name": final_name, "type": rk,
+                            "year": year, "status": st, "message": msg})
+
+    print("-" * 72)
+    print(f"汇总：成功/已存在 {ok_count}，缺失或巨潮无 {miss_count}，异常 {err_count}")
+
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=1)
+        print(f"明细已写入：{args.report}")
+
+    if err_count:
+        print("\n异常明细：")
+        for r in records:
+            if r.get("status") in ("error", "verify_failed"):
+                print(f"  ❌ {r.get('name')}({r.get('symbol')}) {r.get('type')}{r.get('year', '')}: {r.get('message') or r.get('error')}")
+    return 0
+
+
+def _single(args):
+    """
+    单只股票下载入口。
+
+    入参 args：argparse 解析后的命名空间。
+    返回：进程退出码。
+    """
+    try:
+        report_key = cc.normalize_type(args.report_type)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return 1
+
+    try:
+        org_id, official_name = cc.get_org_info(args.symbol)
+    except cc.ReportError as e:
+        print(f"❌ {e}")
+        return 1
+
+    stock_name = args.name or official_name
+    if args.name and official_name and args.name != official_name:
+        print(f"ℹ️  本地命名为「{args.name}」，巨潮现用简称为「{official_name}」")
+
+    year = args.pos_year
+    if not year:
+        # 不指定年份：年报取最新一期的实际年份，季报取当前年份
+        if report_key == "年度报告":
+            found = cc.find_latest_annual(args.symbol, org_id, stock_name)
+            if not found:
+                print(f"❌ 未找到 {args.symbol} 的年度报告")
+                return 1
+            year = found
+        else:
+            year = str(time.localtime().tm_year)
+
+    print(f"正在下载 {stock_name}({args.symbol}) {year}年{cc.REPORT_TYPE_NAME[report_key]}...")
+    try:
+        res = cc.fetch_report(
+            args.symbol, org_id, report_key, year, args.save_dir,
+            stock_name=stock_name, verify=not args.no_verify, force=args.force,
+        )
+    except cc.ReportError as e:
+        print(f"❌ {e}")
+        return 1
+
+    marks = {"downloaded": "✅", "exists": "⏭ 已存在，跳过下载",
+             "not_found": "➖", "verify_failed": "⚠️"}
+    print(f"{marks.get(res['status'], '?')} {res['message']}")
+    if res["status"] in ("downloaded", "exists"):
+        print(f"   保存位置：{res['path']}")
+        if res["status"] == "downloaded":
+            pages = _page_count(res["path"])
+            if pages:
+                print(f"   页数：{pages}")
+    return 0 if res["status"] in ("downloaded", "exists", "not_found") else 1
+
+
+def _page_count(pdf_path):
+    """
+    读取 PDF 总页数，失败返回 None。
+
+    入参 pdf_path：PDF 路径。
+    返回：页数 int，读取失败为 None。
+    """
+    try:
+        proc = subprocess.run(["pdfinfo", pdf_path], capture_output=True, timeout=60)
+        for line in proc.stdout.decode("utf-8", "ignore").splitlines():
+            if line.startswith("Pages:"):
+                return int(line.split(":", 1)[1].strip())
+    except Exception:
+        pass
+    return None
 
 
 def main():
-    args = sys.argv[1:]
-    if len(args) < 2:
-        print("用法：python3 download_report.py <股票代码> <报告类型> [年份] [保存目录]")
-        print("  报告类型：年报/年度报告/半年报/半年度报告/一季报/一季度报告/三季报/三季度报告")
-        print("  示例：python3 download_report.py 300750 年报")
-        print("  示例：python3 download_report.py 300750 一季报 2026")
-        print("  示例：python3 download_report.py 300750 年报 2025 /tmp/")
-        print("  不指定年份时默认使用当前年份。")
-        sys.exit(1)
+    """
+    命令行入口，解析参数并分发到单只或批量模式。
+    """
+    parser = argparse.ArgumentParser(
+        description="下载 A 股定期报告 PDF（巨潮资讯）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("symbol", nargs="?", help="股票代码，如 300750")
+    parser.add_argument("report_type", nargs="?", help="年报/半年报/一季报/三季报")
+    parser.add_argument("pos_year", nargs="?", help="报告年份，如 2025；不填取最新")
+    parser.add_argument("save_dir", nargs="?", default="/tmp", help="保存目录，默认 /tmp")
+    parser.add_argument("--name", help="公司简称；不填自动取巨潮官方简称")
+    parser.add_argument("--force", action="store_true", help="文件已存在时强制重新下载")
+    parser.add_argument("--no-verify", action="store_true", help="跳过 PDF 首页标题校验")
+    parser.add_argument("--batch", metavar="清单.json", help="批量模式：JSON 清单路径")
+    parser.add_argument("--types", help="批量模式的报告类型，逗号分隔，默认 年报,一季报")
+    parser.add_argument("--year", help="批量模式的目标报告年份；不填则当年+去年各查一次")
+    parser.add_argument("--base-dir", help="批量模式的父目录，每家公司建一个子文件夹")
+    parser.add_argument("--check-only", action="store_true", help="批量模式只检查缺失、不下载")
+    parser.add_argument("--interval", type=float, default=0.35, help="批量模式每份之间的间隔秒数")
+    parser.add_argument("--report", help="把批量结果明细写入 JSON 文件")
+    args = parser.parse_args()
 
-    symbol = args[0]
-    report_type_input = args[1]
-    save_dir = "/tmp"
-    year = None
-
-    # 智能解析可选参数：年份是纯数字，保存目录是路径
-    if len(args) > 2:
-        if args[2].isdigit():
-            year = args[2]
-            if len(args) > 3:
-                save_dir = args[3]
-        else:
-            # 第三个参数是保存目录，年份留空
-            save_dir = args[2]
-
-    # 标准化报告类型
-    searchkey = KEYWORD_MAP.get(report_type_input, report_type_input)
-    if searchkey not in REPORT_TYPE_NAME:
-        print(f"❌ 不支持的报告类型: {report_type_input}")
-        print(f"   支持的类型: 年报、半年报、一季报、三季报（或完整名称）")
-        sys.exit(1)
-
-    report_type_key = searchkey
-
-    # 获取 orgId
-    try:
-        org_id = _get_org_id(symbol)
-    except ValueError as e:
-        print(f"❌ {e}")
-        sys.exit(1)
-
-    # 日期范围：指定年份则限定，不指定则用极宽范围覆盖全部历史（取最新公布）
-    if year:
-        start_date = f"{year}-01-01"
-        end_date = f"{int(year)+1}-12-31"
-    else:
-        start_date = "2000-01-01"
-        end_date = "2099-12-31"
-
-    year_display = year if year else "不限年份（最新）"
-    print(f"正在查询 {symbol} {year_display}{report_type_key}...")
-    reports = _query_reports(symbol, org_id, searchkey, start_date, end_date)
-
-    if not reports:
-        print(f"❌ 未找到 {symbol} {year_display}{report_type_key} 的报告")
-        sys.exit(1)
-
-    if len(reports) > 1:
-        print(f"找到 {len(reports)} 份相关报告，取最新的一份：")
-        for i, (title, url, size, _) in enumerate(reports):
-            size_str = f"{size/1024:.1f}MB" if size >= 1024 else f"{size}KB"
-            print(f"  [{i+1}] {title} ({size_str})")
-        title, pdf_url, size_kb, _ = reports[0]
-    else:
-        title, pdf_url, size_kb, _ = reports[0]
-        size_str = f"{size_kb/1024:.1f}MB" if size_kb >= 1024 else f"{size_kb}KB"
-        print(f"找到报告: {title} ({size_str})")
-
-    # 获取股票名称
-    try:
-        from akshare.stock_fundamental.stock_notice import __get_stock_json
-        mapping = __get_stock_json(symbol)
-        stock_name = None
-        for k, v in mapping.items():
-            if v == org_id:
-                stock_name = k
-                break
-        if not stock_name:
-            clean_title = title.replace("<em>", "").replace("</em>", "")
-            m = re.match(r"^(.+?)(\d{4}年)", clean_title)
-            if m:
-                candidate = m.group(1)
-                if not re.match(r"^\d{4}年$", candidate):
-                    stock_name = candidate
-    except Exception:
-        stock_name = None
-
-    if not stock_name:
-        try:
-            import akshare as ak
-            profile = ak.stock_profile_cninfo(symbol=symbol)
-            if not profile.empty:
-                stock_name = profile.iloc[0].get("A股简称", symbol)
-        except Exception:
-            pass
-
-    if not stock_name:
-        stock_name = symbol
-
-    # 从标题提取年份（不指定年份时从公告标题中取）
-    if not year:
-        clean_title = title.replace("<em>", "").replace("</em>", "")
-        m = re.search(r"(\d{4})年", clean_title)
-        year = m.group(1) if m else str(datetime.now().year)
-
-    # 生成标准文件名
-    std_filename = _make_standard_filename(stock_name, symbol, year, report_type_key)
-    dest_path = os.path.join(save_dir, std_filename)
-
-    # 如果文件已存在且大小一致，跳过
-    if os.path.exists(dest_path):
-        existing_size = os.path.getsize(dest_path)
-        if abs(existing_size - size_kb * 1024) < 1024:
-            print(f"⏭ 文件已存在且大小一致，跳过下载: {dest_path}")
-        else:
-            print(f"⚠ 文件已存在但大小不一致（已有 {existing_size/1024:.1f}KB，远程 {size_kb}KB），将重新下载")
-            ok, result = _download_file(pdf_url, dest_path)
-            if not ok:
-                print(f"❌ 下载失败: {result}")
-                sys.exit(1)
-            actual_size = result if isinstance(result, int) else os.path.getsize(dest_path)
-            print(f"✅ 下载完成: {dest_path} ({actual_size/1024:.1f}KB)")
-            print(f"   文件名: {std_filename}")
-    else:
-        print(f"正在下载: {pdf_url}")
-        print(f"保存到: {dest_path}")
-        ok, result = _download_file(pdf_url, dest_path)
-        if not ok:
-            print(f"❌ 下载失败: {result}")
-            sys.exit(1)
-        actual_size = result if isinstance(result, int) else os.path.getsize(dest_path)
-        print(f"✅ 下载完成: {dest_path} ({actual_size/1024:.1f}KB)")
-        print(f"   文件名: {std_filename}")
-
-    # 连带下载最新年报（如果本地尚未有）
-    annual = _find_latest_annual_report(symbol, org_id)
-    if annual:
-        annual_title, annual_url, annual_size_kb, annual_year = annual
-        annual_filename = _make_standard_filename(stock_name, symbol, annual_year, "年度报告")
-        annual_dest = os.path.join(save_dir, annual_filename)
-        if os.path.exists(annual_dest):
-            existing_size = os.path.getsize(annual_dest)
-            if abs(existing_size - annual_size_kb * 1024) < 1024:
-                print(f"\n⏭ 最新年报已存在，跳过: {annual_filename}")
-            else:
-                print(f"\n⚠ 最新年报已存在但大小不一致，重新下载: {annual_filename}")
-                ok2, result2 = _download_file(annual_url, annual_dest)
-                if ok2:
-                    print(f"✅ 年报下载完成: {annual_dest} ({result2/1024:.1f}KB)")
-                else:
-                    print(f"❌ 年报下载失败: {result2}")
-        else:
-            print(f"\n正在连带下载最新年报: {annual_title}")
-            ok2, result2 = _download_file(annual_url, annual_dest)
-            if ok2:
-                print(f"✅ 年报下载完成: {annual_dest} ({result2/1024:.1f}KB)")
-                print(f"   文件名: {annual_filename}")
-            else:
-                print(f"❌ 年报下载失败: {result2}")
+    if args.batch:
+        return _batch(args)
+    if not args.symbol or not args.report_type:
+        parser.print_help()
+        return 1
+    return _single(args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
