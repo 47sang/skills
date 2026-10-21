@@ -1,8 +1,8 @@
-# 讲解视频（am video，3Blue1Brown 风格）
+# Explainer videos (am video, 3Blue1Brown style)
 
-SKILL.md 第 7 节把你送来时读本文件。`am` 指 SKILL.md 第 2 节里完整的 `node ".../scripts/am.mjs"` 命令；路径要写全，因为本文件里 `${CLAUDE_SKILL_DIR}` 不会被替换。
+Read this when SKILL.md section 7 sends you here. `am` means the full `node ".../scripts/am.mjs"` command from SKILL.md section 2; write the path out in full, because `${CLAUDE_SKILL_DIR}` is not replaced in this file.
 
-视频草稿的格式与页面草稿相同，只多一条规则：以 `>` 开头的行是旁白，一行一个节拍。
+A video draft has the same format as a page draft, with one extra rule: lines starting with `>` are narration, one beat per line.
 
 ````bash
 am video - --no-open <<'AM_EOF'
@@ -24,13 +24,13 @@ Client -> Server: ACK
 AM_EOF
 ````
 
-- 一个 `## ` 就是一个场景。每个场景放一个组件（或一个表格、一个列表）作为画面，下面写 2–5 行旁白。
-- 第 N 行旁白播放时，画面显示第 N 步。flow / er / sequence / tree 里每条源行就是一步；timeline、limits、表格行和列表项按条目步进。所以组件的行序就是讲解的顺序。当旁白行数多于步数时，多出的行在前面作为开场，不展示新内容。
-- 旁白里写 `[name]`：镜头推近到组件里同名的节点或参与方并高亮它。名称必须与组件里的写法一致。
-- 相邻场景里同名的节点会平滑移动到新位置。要让观众盯住同一个对象，就在下一个场景里复用同一个名字。
-- 每个视频 3–6 个场景，每行旁白一两句话。
-- 旁白是要读出来的，所以按口语写，像面对面给人讲解：「你看」「那问题来了」「我们换个角度看」这类转场没问题，角色的「台词」放引号里。不要写成说明书腔（「客户端发送 SYN 报文以请求建立连接」）。句长仍受 STE 检查约束。
-- 外观默认跟随设置里的主题（通常是蓝图绘图风格）。用户想要「3b1b 那种暗色风格」时，在 frontmatter 写 `theme: 3b1b`。
-- 旁白音色：默认 `--voice auto`：设了 `ELEVENLABS_API_KEY` 用 ElevenLabs，否则用系统 TTS（macOS say），两者都没有时只出字幕。用户说「不要声音」时加 `--voice off`。用户跑本地 OpenAI 兼容语音服务并设了 `AM_TTS_URL` 时，用 `--voice local`。
-- 产物是 `~/.answer-me-with-html/videos/` 下的单文件播放器页面（音频已内嵌）。播放器在控件上方有一条章节条（点胶囊跳进该场景）、一个倍速按钮（0.5× 到 2×）和一个导出按钮（⤓），导出在浏览器里编码同一个视频并下载，进度显示在按钮上。用户想要页面旁边的视频文件时，加 `--mp4` 得到 MP4（需要 ffmpeg，耗时约为视频时长的 1.3 倍）。没有 ffmpeg 就加 `--webm`：页面自行编码 WebM（VP9 + Opus）；耗时取决于页面动了多少（实测：11 秒的草稿 28 秒，2 分 27 秒的讲解 13.5 分钟）。两者都需要 Chrome 和 Node.js 22+。导出按钮需要安全上下文（本地文件或 `localhost`）：普通 HTTP 提供的页面用不了 WebCodecs。播放器页面为此增大约 19 KB。
-- 完整语法：`am help video`。在终端里，回复一句话加上播放器页面链接（以及 MP4 链接），写法同 SKILL.md 第 2 节第 5 步。
+- One `## ` is one scene. Put one component (or one table, one list) in a scene as the picture, and write 2–5 narration lines below it.
+- When the Nth narration line plays, the picture shows step N. In flow / er / sequence / tree every source line is one step; timeline, limits, chart rows, table rows and list items step by entry. So the line order of the component is the order of the explanation. When there are more narration lines than steps, the extra first lines serve as an opening and show nothing new.
+- Write `[name]` in narration: the camera zooms in on the node or actor with that name and highlights it. The name must match how it is written in the component.
+- Nodes with the same name in adjacent scenes move smoothly to their new position. To keep the viewer following one object, reuse the same name in the next scene.
+- 3–6 scenes per video, one or two sentences per narration line.
+- Narration is read aloud, so write it as speech, as if explaining to someone face to face: transitions like `你看`, `那问题来了`, `我们换个角度看` are fine, and characters' "lines" go in quotes. Do not write it like a manual (`客户端发送 SYN 报文以请求建立连接`). Sentence length is still subject to the STE check.
+- The look follows the theme in the settings by default (usually the blueprint drawing style). When the user wants "that dark 3b1b style", write `theme: 3b1b` in the frontmatter.
+- Narration voice: the default is `--voice auto`: ElevenLabs when `ELEVENLABS_API_KEY` is set, otherwise system TTS (macOS say), and subtitles only when neither is available. When the user says "no sound", add `--voice off`. When the user runs a local OpenAI-compatible speech service and has set `AM_TTS_URL`, use `--voice local`.
+- The output is a single-file player page under `~/.answer-me-with-html/videos/` (audio embedded). The player carries a chapter strip above the controls (a chip jumps into that scene), a speed button (0.5× to 2×) and an export button (⤓) that encodes the same video in the browser and downloads it, with the progress on the button. When the user wants a video file next to the page, add `--mp4` for an MP4 (needs ffmpeg, about 1.3 times the video length). Without ffmpeg, add `--webm` instead: the page encodes a WebM (VP9 + Opus) itself; its time depends on how much of the page moves (measured: 28 s for an 11-second draft, 13.5 minutes for a 2:27 explainer). Both need Chrome and Node.js 22+. The export button needs a secure context (a local file or `localhost`): WebCodecs is not available to a page served over plain HTTP. The player page grows by about 19 KB for this.
+- Full syntax: `am help video`. In the terminal, reply with one sentence plus the player page link (and the MP4 link), written as in step 5 of section 2 of SKILL.md.
